@@ -44,6 +44,8 @@ def main():
         "create_material",
         name="PersistentMaterial",
         base_color=[0.2, 0.4, 0.6, 1.0],
+        metallic=0.0,
+        roughness=0.5,
         assign_to_object="PersistentMesh",
     )
     check(material["assigned_to"] == "PersistentMesh", "material assignment lost the scene")
