@@ -74,6 +74,28 @@ Fast64 no exporta un formato universal: genera recursos F3D/N64 y assets especí
 - [Fast64](https://github.com/Fast-64/fast64)
 - [Documentación de exportación SM64](https://github.com/Fast-64/fast64/tree/main/fast64_internal/sm64)
 
+## Prueba DynOS: Mario Star
+
+La CI genera una variante del modelo oficial de Coop Deluxe: gorra azul y emblema dorado. Mantiene el armature, los grupos de vértices y las acciones de animación originales.
+
+El exportador Fast64-Gart crea inicialmente `Assets/mario/`. El empaquetador de esta alpha aplana esa carpeta para que la estructura final sea:
+
+```text
+dynos/packs/MarioStar/
+  Assets/
+    geo.inc.c
+    geo_header.h
+    model.inc.c
+    *.png
+  README.txt
+```
+
+Este nivel es obligatorio: el generador de SM64CoopDX recorre las carpetas inmediatas del pack y busca `model.inc.c` y `geo.inc.c` dentro de cada una. No debe quedar un nivel extra como `Assets/mario/model.inc.c`.
+
+Para probarlo, copia la carpeta `MarioStar` a `dynos/packs/`, elimina cualquier `mario_geo.bin` antiguo de ese pack y abre el juego. SM64CoopDX generará `mario_geo.bin` en la raíz de `MarioStar`. Después activa `MarioStar` en **Options > DynOS Packs**. Esta variante reemplaza el modelo de Mario; no agrega una entrada de personaje separada llamada “Mario Star”.
+
+El artifact `mario-star-dynos-source-pack` incluye el ZIP del pack, el proyecto Blender y un informe JSON. La CI valida la estructura de fuentes y la exportación Fast64-Gart, pero no inicia el juego; la prueba visual final sigue pendiente.
+
 ## Limitaciones de esta alpha
 
 - El modelado genera geometría real a partir de vértices/caras proporcionados; no crea por sí solo un modelo artístico completo desde una descripción de texto.

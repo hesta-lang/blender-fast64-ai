@@ -196,15 +196,52 @@ def main():
     require(geo_files, "No geolayout output was generated")
     require(model_files, "No model/display-list output was generated")
 
+    # DynOS scans the immediate children of dynos/packs/<pack> and reads
+    # model.inc.c / geo.inc.c inside each child folder. Fast64-Gart creates
+    # Assets/mario/*, so flatten that one extra directory into Assets/*.
+    actor_dirs = [
+        path for path in assets_dir.iterdir()
+        if path.is_dir() and (path / "model.inc.c").is_file() and (path / "geo.inc.c").is_file()
+    ]
+    require(len(actor_dirs) == 1,
+            "Expected exactly one Fast64 actor folder containing model.inc.c and geo.inc.c; found: " +
+            ", ".join(path.name for path in actor_dirs))
+    exported_actor_dir = actor_dirs[0]
+    moved_files = []
+    for child in sorted(exported_actor_dir.iterdir()):
+        destination = assets_dir / child.name
+        require(not destination.exists(), f"DynOS Assets flattening would overwrite {destination.name}")
+        child.rename(destination)
+        moved_files.append(destination.name)
+    exported_actor_dir.rmdir()
+
+    # Verify the exact layout used by SM64CoopDX's DynOS_Actor_GeneratePack:
+    # <pack>/<subfolder>/model.inc.c and <pack>/<subfolder>/geo.inc.c.
+    require((assets_dir / "model.inc.c").is_file(),
+            "DynOS pack layout invalid: Assets/model.inc.c is missing")
+    require((assets_dir / "geo.inc.c").is_file(),
+            "DynOS pack layout invalid: Assets/geo.inc.c is missing")
+    require((assets_dir / "geo_header.h").is_file(),
+            "Fast64 export is missing Assets/geo_header.h")
+    geo_source = (assets_dir / "geo.inc.c").read_text(encoding="utf-8")
+    require("mario_geo[]" in geo_source,
+            "DynOS actor root must be named mario_geo so SM64CoopDX generates mario_geo.bin")
+    require(not any(path.is_dir() for path in assets_dir.iterdir()),
+            "DynOS Assets must contain the actor source files directly, not another nested folder")
+    generated = sorted(path for path in assets_dir.iterdir() if path.is_file())
+    geo_files = [path.name for path in generated if "geo" in path.name.lower()]
+    model_files = [path.name for path in generated if "model" in path.name.lower()]
+
     pack_root.joinpath("README.txt").write_text(
         "Mario Star - DynOS source pack candidate\n"
         "========================================\n\n"
         "Install this folder under the game's dynos/packs directory.\n"
-        "The exported C sources and textures are in Assets/.\n"
-        "SM64CoopDX creates runtime .bin assets when the pack is loaded.\n"
-        "Delete stale generated .bin files before rebuilding changed assets.\n\n"
-        "This artifact validates Fast64-Gart export only. It has not been opened\n"
-        "in SM64CoopDX; in-game loading and appearance are not yet verified.\n",
+        "The model.inc.c, geo.inc.c, geo_header.h and textures are directly in Assets/.\n"
+        "This direct layout is required by SM64CoopDX DynOS_Actor_GeneratePack.\n"
+        "Install MarioStar under dynos/packs, then start the game to generate mario_geo.bin.\n"
+        "Enable MarioStar in Options > DynOS Packs. It replaces the Mario model; it does not\n"
+        "create a separate player entry named Mario Star. Delete old mario_geo.bin first.\n\n"
+        "CI validates source layout and export. It does not launch SM64CoopDX.\n",
         encoding="utf-8",
     )
     try:
@@ -247,6 +284,7 @@ def main():
                 archive.write(file_path, file_path.relative_to(pack_root.parent))
 
     print("BFAI_MARIO_STAR_MATERIALS:" + json.dumps(after))
+    print("BFAI_DYNOS_LAYOUT:PASS")
     print("BFAI_MARIO_STAR_OUTPUT:" + json.dumps(report["output_files"]))
     print("BFAI_MARIO_STAR_EXPORT:PASS")
 
