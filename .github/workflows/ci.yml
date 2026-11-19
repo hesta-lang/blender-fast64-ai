@@ -53,3 +53,29 @@ jobs:
           BFAI_FAST64_ADDON_PATH: ${{ github.workspace }}/external/fast64
           BFAI_DATA_DIR: ${{ runner.temp }}/bfai-fast64
         run: blender --background --factory-startup --python tests/fast64_smoke.py
+
+  dynos-mario-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Fast64 addon
+        uses: actions/checkout@v4
+        with:
+          repository: Fast-64/fast64
+          ref: ea622b16a9821cf85154239d774120462c07e927
+          path: external/fast64
+          persist-credentials: false
+      - name: Install Blender and template dependencies
+        run: sudo apt-get update && sudo apt-get install -y blender python3-numpy
+      - name: Download official Coop Deluxe Mario template
+        run: curl -L --fail --retry 3 "https://raw.githubusercontent.com/coop-deluxe/character-template/main/Mario%20Coop%20Model%20Template.blend" -o mario-template.blend
+      - name: Inspect Mario rig and mesh structure
+        env:
+          BFAI_REPORT: ${{ github.workspace }}/mario_template_report.json
+        run: blender --background mario-template.blend --python tests/dynos_mario_template.py
+      - name: Upload Mario template inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: dynos-mario-template-inspection
+          path: mario_template_report.json
+          if-no-files-found: error
