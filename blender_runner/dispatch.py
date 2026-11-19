@@ -536,14 +536,12 @@ def run(req):
         if not hasattr(root, "geo_cmd"):
             raise RuntimeError("Fast64 geolayout bone properties are not registered")
         previous_root_command = root.geo_cmd
-        root.geo_cmd = "Start"
         output_root = exports / p["output_folder"]
         if output_root.exists() and any(output_root.iterdir()):
             raise ValueError("Export folder already contains files; choose a new output_folder to avoid overwriting")
         output_root.mkdir(parents=True, exist_ok=True)
         scene = bpy.context.scene
         if not hasattr(scene, "fast64") or not hasattr(scene.fast64, "sm64"):
-            root.geo_cmd = previous_root_command
             raise RuntimeError("Fast64 SM64 scene properties are not registered")
         sm64_props = scene.fast64.sm64
         combined = sm64_props.combined_export
@@ -562,7 +560,15 @@ def run(req):
         }
         old_active = bpy.context.view_layer.objects.active
         old_selected = list(bpy.context.selected_objects)
+        export_succeeded = False
         try:
+            # Fast64's Bone.geo_cmd update callback inspects context.object and
+            # creates Armature bone collections. Set the armature active before
+            # changing the root command; otherwise the callback receives the mesh.
+            bpy.ops.object.select_all(action="DESELECT")
+            armature.select_set(True)
+            bpy.context.view_layer.objects.active = armature
+            root.geo_cmd = "Start"
             if hasattr(scene, "gameEditorMode"):
                 try:
                     scene.gameEditorMode = "SM64"
@@ -579,14 +585,13 @@ def run(req):
             combined.object_name = p.get("object_name") or mesh.name
             combined.use_name_filtering = False
             scene.saveTextures = bool(p.get("save_textures", True))
-            bpy.ops.object.select_all(action="DESELECT")
-            armature.select_set(True)
-            bpy.context.view_layer.objects.active = armature
             result = bpy.ops.object.sm64_export_geolayout_armature(export_obj=armature.name)
             if "FINISHED" not in result:
                 raise RuntimeError(f"Fast64 SM64 geolayout exporter did not finish: {sorted(result)}")
+            export_succeeded = True
         finally:
-            root.geo_cmd = root.geo_cmd if root.geo_cmd == "Start" else previous_root_command
+            if not export_succeeded:
+                root.geo_cmd = previous_root_command
             sm64_props.export_type = previous_scene_values["export_type"]
             combined.export_header_type = previous_scene_values["export_header_type"]
             combined.custom_export_path = previous_scene_values["custom_export_path"]
