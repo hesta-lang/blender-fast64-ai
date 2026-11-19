@@ -234,7 +234,7 @@ def main():
 
     # DynOS strips the .inc.c suffix from texture include paths and loads the
     # corresponding PNG. Validate every referenced image before packaging.
-    texture_includes = re.findall(r'#include\\s+"([^"]+\\.inc\\.c)"', model_source)
+    texture_includes = re.findall(r'#include\s+"([^"]+\.inc\.c)"', model_source)
     require(texture_includes, "model.inc.c contains no texture include references")
     missing_textures = []
     for include in texture_includes:
@@ -258,16 +258,16 @@ def main():
     model_files = [path.name for path in generated if "model" in path.name.lower()]
 
     pack_root.joinpath("README.txt").write_text(
-        "Mario Star - DynOS source pack candidate\\n"
-        "========================================\\n\\n"
-        "Install this folder under the game's dynos/packs directory.\\n"
-        "Assets/model.inc.c, geo.inc.c and geo_header.h are directly inside Assets/.\\n"
-        "Keep the PNG textures in Assets/mario/: model.inc.c references those exact paths.\\n"
-        "SM64CoopDX reads actor sources from the immediate Assets/ child folder and resolves\\n"
-        "texture includes against PNG files under the pack root.\\n"
-        "Install MarioStar under dynos/packs, delete any old mario_geo.bin, then start the game.\\n"
-        "Enable MarioStar in Options > DynOS Packs. It replaces Mario; it is not a separate player.\\n\\n"
-        "CI validates source layout, texture references and Fast64 export. It does not launch the game.\\n",
+        "Mario Star - DynOS source pack candidate\n"
+        "========================================\n\n"
+        "Install this folder under the game's dynos/packs directory.\n"
+        "Assets/model.inc.c, geo.inc.c and geo_header.h are directly inside Assets/.\n"
+        "Keep the PNG textures in Assets/mario/: model.inc.c references those exact paths.\n"
+        "SM64CoopDX reads actor sources from the immediate Assets/ child folder and resolves\n"
+        "texture includes against PNG files under the pack root.\n"
+        "Install MarioStar under dynos/packs, delete any old mario_geo.bin, then start the game.\n"
+        "Enable MarioStar in Options > DynOS Packs. It replaces Mario; it is not a separate player.\n\n"
+        "CI validates source layout, texture references and Fast64 export. It does not launch the game.\n",
         encoding="utf-8",
     )
     try:
