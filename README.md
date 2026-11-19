@@ -6,7 +6,7 @@
 
 ## Arquitectura
 
-\`\`\`text
+```text
 Cliente MCP local
       | stdio
       v
@@ -18,48 +18,48 @@ Blender --background (blender_runner/)
       +-- rigging: armatures, auto weights y pesos explícitos
       +-- materiales: Principled BSDF e imágenes
       +-- Fast64: diagnóstico, catálogo y ejecución restringida de exportadores
-\`\`\`
+```
 
 ## Herramientas
 
 | Herramienta | Función |
 |---|---|
-| \`workspace_status\` / \`inspect_scene\` | Estado de Blender, escena, mallas, materiales, imágenes y huesos |
-| \`list_objects\`, \`rename_object\`, \`set_object_transform\` | Gestión de objetos |
-| \`import_model\` | Importa BLEND, FBX, OBJ, GLB, GLTF, STL o PLY desde \`data/workspace/imports/\` |
-| \`create_mesh_object\` | Crea una malla Blender editable desde vértices y caras; límite 50.000 vértices/caras |
-| \`smart_uv_unwrap\` | Genera UVs mediante Smart UV Project |
-| \`create_armature\` | Crea un esqueleto de huesos con jerarquía padre-hijo |
-| \`bind_mesh_to_armature\` | Intenta rigging automático de Blender (bone heat) |
-| \`set_vertex_weights\` | Aplica pesos explícitos por vértice y hueso |
-| \`create_material\` | Crea material Principled BSDF y opcionalmente carga imagen desde \`imports/\` |
-| \`assign_material\` | Asigna un material existente a una malla |
-| \`fast64_diagnostics\` | Detecta módulos, addon habilitado y espacios de operadores |
-| \`fast64_export_operators\` | Descubre operadores de exportación y expone sus propiedades |
-| \`fast64_run_export\` | Ejecuta un operador de exportación detectado, con propiedades validadas y rutas restringidas a \`exports/\` |
-| \`save_project\` | Guarda la escena como \`data/workspace/active.blend\` |
+| `workspace_status` / `inspect_scene` | Estado de Blender, escena, mallas, materiales, imágenes y huesos |
+| `list_objects`, `rename_object`, `set_object_transform` | Gestión de objetos |
+| `import_model` | Importa BLEND, FBX, OBJ, GLB, GLTF, STL o PLY desde `data/workspace/imports/` |
+| `create_mesh_object` | Crea una malla Blender editable desde vértices y caras; límite 50.000 vértices/caras |
+| `smart_uv_unwrap` | Genera UVs mediante Smart UV Project |
+| `create_armature` | Crea un esqueleto de huesos con jerarquía padre-hijo |
+| `bind_mesh_to_armature` | Intenta rigging automático de Blender (bone heat) |
+| `set_vertex_weights` | Aplica pesos explícitos por vértice y hueso |
+| `create_material` | Crea material Principled BSDF y opcionalmente carga imagen desde `imports/` |
+| `assign_material` | Asigna un material existente a una malla |
+| `fast64_diagnostics` | Detecta módulos, addon habilitado y espacios de operadores |
+| `fast64_export_operators` | Descubre operadores de exportación y expone sus propiedades |
+| `fast64_run_export` | Ejecuta un operador de exportación detectado, con propiedades validadas y rutas restringidas a `exports/` |
+| `save_project` | Guarda la escena como `data/workspace/active.blend` |
 
 No se expone una consola Python, shell, ni ejecución de código arbitrario. El dispatcher solo acepta acciones definidas. Los datos de malla, huesos, pesos, colores y rutas se validan antes de llegar a Blender.
 
 ## Uso de archivos
 
-Coloca modelos y texturas que quieras importar en \`data/workspace/imports/\`. Texturas soportadas por \`create_material\`: PNG, JPG/JPEG, TGA, TIFF, BMP y EXR. Las exportaciones Fast64 deben guardarse dentro de \`data/workspace/exports/\`.
+Coloca modelos y texturas que quieras importar en `data/workspace/imports/`. Texturas soportadas por `create_material`: PNG, JPG/JPEG, TGA, TIFF, BMP y EXR. Las exportaciones Fast64 deben guardarse dentro de `data/workspace/exports/`.
 
 ## Requisitos
 
 - Python 3.11+
-- Blender instalado y accesible como \`blender\`.
+- Blender instalado y accesible como `blender`.
 - Fast64 instalado y habilitado en Blender para exportar assets F3D/N64.
 - Docker opcional.
 
 ## Desarrollo local
 
-\`\`\`bash
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python -m server.main
-\`\`\`
+```
 
 El servidor utiliza MCP por stdio. No expongas esta versión a Internet: todavía no incorpora OAuth remoto, TLS, aislamiento multiusuario ni una interfaz de carga autenticada.
 
@@ -75,7 +75,7 @@ Fast64 no exporta un formato universal: genera recursos F3D/N64 y assets especí
 - El modelado genera geometría real a partir de vértices/caras proporcionados; no crea por sí solo un modelo artístico completo desde una descripción de texto.
 - El rigging automático depende de la topología y puede fallar con mallas desconectadas o geometría no adecuada. Los pesos explícitos permiten corregirlo manualmente.
 - Los materiales Principled son materiales Blender normales. Fast64 necesita sus propios materiales F3D y configuración específica.
-- Los operadores Fast64 pueden requerir contexto de interfaz, proyecto decomp, materiales F3D y selección de objetos. El trabajador corre en \`--background\`, así que algunos operadores no serán ejecutables en este contexto.
+- Los operadores Fast64 pueden requerir contexto de interfaz, proyecto decomp, materiales F3D y selección de objetos. El trabajador corre en `--background`, así que algunos operadores no serán ejecutables en este contexto.
 - No se ha validado en una instalación real de Blender + Fast64 ni se ha completado una exportación DynOS real.
 - No se ha implementado todavía un servidor remoto autenticado conectable desde ChatGPT móvil.
 
