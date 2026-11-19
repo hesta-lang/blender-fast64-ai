@@ -296,6 +296,8 @@ def main():
         "output_files": [str(p.relative_to(pack_root)) for p in generated],
         "geo_files": geo_files,
         "model_files": model_files,
+        "texture_include_count": len(texture_includes),
+        "missing_texture_count": len(missing_textures),
         "runtime_bin_generated": False,
         "in_game_tested": False,
     }
@@ -311,6 +313,7 @@ def main():
 
     print("BFAI_MARIO_STAR_MATERIALS:" + json.dumps(after))
     print("BFAI_DYNOS_LAYOUT:PASS")
+    print("BFAI_DYNOS_TEXTURES:PASS:" + str(len(texture_includes)))
     print("BFAI_MARIO_STAR_OUTPUT:" + json.dumps(report["output_files"]))
     print("BFAI_MARIO_STAR_EXPORT:PASS")
 
