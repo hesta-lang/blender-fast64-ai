@@ -5,7 +5,7 @@ from server.blender_runner import run_blender
 from server.validation import (
     finite_vector, safe_name, safe_filename, safe_texture_filename,
     validate_mesh_data, validate_bones, validate_weights,
-    validate_color, validate_scalar,
+    validate_color, validate_scalar, validate_sm64_binary_assignments, safe_export_folder,
 )
 
 mcp = FastMCP("Blender Fast64 AI Bridge")
@@ -113,6 +113,59 @@ def assign_material(object_name: str, material_name: str) -> str:
 def smart_uv_unwrap(mesh_name: str) -> str:
     """Create UVs using Blender Smart UV Project for an existing mesh."""
     return encoded(run_blender("smart_uv_unwrap", mesh_name=safe_name(mesh_name)))
+
+
+@mcp.tool()
+def convert_materials_to_f3d(mesh_name: str, rename_uv_maps: bool = True) -> str:
+    """Use Fast64's own Principled BSDF converter to create native F3D materials for one mesh."""
+    if not isinstance(rename_uv_maps, bool):
+        raise ValueError("rename_uv_maps must be a boolean")
+    return encoded(run_blender(
+        "convert_materials_to_f3d",
+        mesh_name=safe_name(mesh_name),
+        rename_uv_maps=rename_uv_maps,
+    ))
+
+
+@mcp.tool()
+def set_sm64_binary_skinning(mesh_name: str, armature_name: str, assignments: list[dict]) -> str:
+    """Assign exactly one full-weight deform bone to every vertex, as required for SM64 binary skinning. Do not use smooth automatic weights for this export path."""
+    context = run_blender(
+        "sm64_skinning_context",
+        mesh_name=safe_name(mesh_name),
+        armature_name=safe_name(armature_name),
+    )
+    normalized = validate_sm64_binary_assignments(
+        assignments,
+        context["deform_bones"],
+        context["vertex_count"],
+    )
+    return encoded(run_blender(
+        "set_sm64_binary_skinning",
+        mesh_name=safe_name(mesh_name),
+        armature_name=safe_name(armature_name),
+        assignments=normalized,
+    ))
+
+
+@mcp.tool()
+def export_sm64_armature(
+    armature_name: str,
+    output_folder: str = "sm64_export",
+    object_name: str | None = None,
+    save_textures: bool = True,
+) -> str:
+    """Run Fast64's real SM64 Armature Geolayout C exporter. Requires one mesh child, native F3D materials, and one full-weight deform bone per vertex. Writes only below workspace/exports."""
+    if not isinstance(save_textures, bool):
+        raise ValueError("save_textures must be a boolean")
+    params = {
+        "armature_name": safe_name(armature_name),
+        "output_folder": safe_export_folder(output_folder),
+        "save_textures": save_textures,
+    }
+    if object_name is not None:
+        params["object_name"] = safe_name(object_name)
+    return encoded(run_blender("export_sm64_armature", **params))
 
 
 @mcp.tool()

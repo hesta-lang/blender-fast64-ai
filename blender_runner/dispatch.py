@@ -3,6 +3,7 @@ import bpy
 import json
 import math
 import os
+import importlib
 import sys
 import traceback
 from pathlib import Path
@@ -23,6 +24,97 @@ def safe_object(name, expected_type=None):
 
 def fast64_modules():
     return [name for name in sys.modules if "fast64" in name.lower()]
+
+
+def fast64_ready():
+    return hasattr(bpy.ops.object, "convert_bsdf") and hasattr(bpy.context.scene, "fast64")
+
+
+def ensure_fast64_addon():
+    """Load the official Fast64 addon in this Blender worker process."""
+    if fast64_ready():
+        return True
+    addon_path = os.getenv("BFAI_FAST64_ADDON_PATH")
+    if addon_path:
+        package_dir = Path(addon_path).expanduser().resolve()
+        if not (package_dir / "__init__.py").is_file():
+            raise RuntimeError("BFAI_FAST64_ADDON_PATH must point to the Fast64 folder containing __init__.py")
+        parent_dir = str(package_dir.parent)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+    try:
+        bpy.ops.preferences.addon_enable(module="fast64")
+    except Exception:
+        pass
+    if not fast64_ready():
+        try:
+            addon = importlib.import_module("fast64")
+            addon.register()
+        except Exception as exc:
+            raise RuntimeError(f"Could not load the Fast64 Blender addon: {exc}") from exc
+    if not fast64_ready():
+        raise RuntimeError("Fast64 did not register its Principled-to-F3D converter")
+    return True
+
+
+def try_enable_fast64():
+    try:
+        return {"loaded": bool(ensure_fast64_addon()), "error": None}
+    except Exception as exc:
+        return {"loaded": False, "error": str(exc)}
+
+
+def load_workspace_project(workspace):
+    project = workspace / "active.blend"
+    if project.is_file():
+        current = Path(bpy.data.filepath).resolve() if bpy.data.filepath else None
+        if current != project.resolve():
+            bpy.ops.wm.open_mainfile(filepath=str(project), load_ui=False)
+    return project
+
+
+def save_workspace_project(workspace):
+    project = workspace / "active.blend"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        bpy.context.preferences.filepaths.save_version = 1
+    except Exception:
+        pass
+    bpy.ops.wm.save_as_mainfile(filepath=str(project), check_existing=False)
+    if not project.is_file():
+        raise RuntimeError("Blender did not create active.blend")
+    return str(project)
+
+
+def _validate_sm64_binary_mesh(mesh, armature):
+    group_names = {group.index: group.name for group in mesh.vertex_groups}
+    deform_bones = {bone.name: bone for bone in armature.data.bones if bone.use_deform}
+    used_bones = set()
+    for vertex in mesh.data.vertices:
+        influences = [
+            (group_names.get(entry.group), float(entry.weight))
+            for entry in vertex.groups
+            if float(entry.weight) > 1e-5
+        ]
+        if len(influences) != 1:
+            raise ValueError(
+                f"SM64 binary skinning requires one bone influence per vertex; vertex {vertex.index} has {len(influences)}"
+            )
+        bone_name, weight = influences[0]
+        if bone_name not in deform_bones:
+            raise ValueError(f"Vertex {vertex.index} is assigned to a missing or non-deform bone: {bone_name}")
+        if abs(weight - 1.0) > 1e-4:
+            raise ValueError(f"Vertex {vertex.index} must have weight 1.0, not {weight}")
+        used_bones.add(bone_name)
+    if not used_bones:
+        raise ValueError("The mesh has no SM64 deform-bone assignments")
+    for bone_name in used_bones:
+        if deform_bones[bone_name].parent is None:
+            raise ValueError(
+                f"SM64 skinning bone {bone_name} has no parent deform/geolayout node; add it below a parent bone"
+            )
+    return sorted(used_bones)
+
 
 
 def safe_workspace_file(folder, filename):
@@ -144,7 +236,9 @@ def run(req):
     if action == "status":
         enabled = [name for name in bpy.context.preferences.addons.keys() if "fast64" in name.lower()]
         modules = fast64_modules()
-        return {"blender_version": bpy.app.version_string, "project": bpy.data.filepath or None, "fast64_loaded": bool(modules or enabled), "fast64_modules": modules[:40], "fast64_enabled_addons": enabled}
+        addon = sys.modules.get("fast64")
+        version = (addon.bl_info.get("version") if addon and hasattr(addon, "bl_info") else None)
+        return {"blender_version": bpy.app.version_string, "project": bpy.data.filepath or None, "fast64_loaded": bool(modules or enabled or fast64_ready()), "fast64_version": version, "fast64_modules": modules[:40], "fast64_enabled_addons": enabled}
 
     if action == "inspect_scene":
         return {
@@ -344,11 +438,187 @@ def run(req):
             _restore_selection(old_active, old_selected)
         return {"object": obj.name, "uv_layers": [layer.name for layer in obj.data.uv_layers]}
 
+    if action == "convert_materials_to_f3d":
+        ensure_fast64_addon()
+        obj = safe_object(p["mesh_name"], "MESH")
+        scene = bpy.context.scene
+        old_convert_all = scene.bsdf_conv_all
+        old_rename_uvs = scene.rename_uv_maps
+        old_active = bpy.context.view_layer.objects.active
+        old_selected = list(bpy.context.selected_objects)
+        try:
+            if bpy.context.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            scene.bsdf_conv_all = False
+            scene.rename_uv_maps = bool(p.get("rename_uv_maps", True))
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            result = bpy.ops.object.convert_bsdf()
+            if "FINISHED" not in result:
+                raise RuntimeError(f"Fast64 Principled-to-F3D conversion did not finish: {sorted(result)}")
+        finally:
+            scene.bsdf_conv_all = old_convert_all
+            scene.rename_uv_maps = old_rename_uvs
+            _restore_selection(old_active, old_selected)
+        materials = [slot.material for slot in obj.material_slots]
+        not_converted = [mat.name if mat else "<empty>" for mat in materials if mat is None or not getattr(mat, "is_f3d", False)]
+        if not materials or not_converted:
+            raise RuntimeError("Fast64 conversion completed without producing F3D materials for every material slot: " + ", ".join(not_converted))
+        return {
+            "object": obj.name,
+            "converted_materials": [mat.name for mat in materials],
+            "f3d_versions": [getattr(mat, "mat_ver", None) for mat in materials],
+            "native_f3d": True,
+        }
+
+    if action == "sm64_skinning_context":
+        mesh = safe_object(p["mesh_name"], "MESH")
+        armature = safe_object(p["armature_name"], "ARMATURE")
+        return {
+            "vertex_count": len(mesh.data.vertices),
+            "deform_bones": [bone.name for bone in armature.data.bones if bone.use_deform],
+        }
+
+    if action == "set_sm64_binary_skinning":
+        mesh = safe_object(p["mesh_name"], "MESH")
+        armature = safe_object(p["armature_name"], "ARMATURE")
+        deform_bones = {bone.name for bone in armature.data.bones if bone.use_deform}
+        if len(p["assignments"]) != len(mesh.data.vertices):
+            raise ValueError("SM64 requires exactly one bone assignment per mesh vertex")
+        by_bone = {}
+        seen = set()
+        for item in p["assignments"]:
+            vertex_index, bone_name = item["vertex"], item["bone"]
+            if vertex_index in seen or not 0 <= vertex_index < len(mesh.data.vertices):
+                raise ValueError("duplicate or out-of-range SM64 vertex assignment")
+            if bone_name not in deform_bones:
+                raise ValueError(f"Unknown or non-deform SM64 bone: {bone_name}")
+            seen.add(vertex_index)
+            by_bone.setdefault(bone_name, []).append(vertex_index)
+        if len(seen) != len(mesh.data.vertices):
+            raise ValueError("Every mesh vertex must be assigned to exactly one deform bone")
+        for group in list(mesh.vertex_groups):
+            mesh.vertex_groups.remove(group)
+        for bone_name, indices in by_bone.items():
+            group = mesh.vertex_groups.new(name=bone_name)
+            group.add(indices, 1.0, "REPLACE")
+        old_world = mesh.matrix_world.copy()
+        mesh.parent = armature
+        mesh.matrix_world = old_world
+        modifier = next((mod for mod in mesh.modifiers if mod.type == "ARMATURE"), None)
+        if modifier is None:
+            modifier = mesh.modifiers.new(name="SM64 Armature", type="ARMATURE")
+        modifier.object = armature
+        return {
+            "mesh": mesh.name,
+            "armature": armature.name,
+            "vertices": len(mesh.data.vertices),
+            "binary_skinning": True,
+            "bone_assignments": {name: len(indices) for name, indices in by_bone.items()},
+        }
+
+    if action == "export_sm64_armature":
+        ensure_fast64_addon()
+        armature = safe_object(p["armature_name"], "ARMATURE")
+        mesh_children = [child for child in armature.children if child.type == "MESH"]
+        if len(mesh_children) != 1:
+            raise ValueError(f"Fast64 SM64 armature export requires exactly one mesh child; found {len(mesh_children)}")
+        mesh = mesh_children[0]
+        materials = [slot.material for slot in mesh.material_slots]
+        if not materials or any(mat is None or not getattr(mat, "is_f3d", False) for mat in materials):
+            raise ValueError("Convert every mesh material to a native Fast64 F3D material before exporting")
+        used_bones = _validate_sm64_binary_mesh(mesh, armature)
+        root_bones = [bone for bone in armature.data.bones if bone.parent is None]
+        if len(root_bones) != 1:
+            raise ValueError(f"SM64 armature export requires exactly one root bone; found {len(root_bones)}")
+        root = root_bones[0]
+        if not hasattr(root, "geo_cmd"):
+            raise RuntimeError("Fast64 geolayout bone properties are not registered")
+        previous_root_command = root.geo_cmd
+        root.geo_cmd = "Start"
+        output_root = exports / p["output_folder"]
+        if output_root.exists() and any(output_root.iterdir()):
+            raise ValueError("Export folder already contains files; choose a new output_folder to avoid overwriting")
+        output_root.mkdir(parents=True, exist_ok=True)
+        scene = bpy.context.scene
+        if not hasattr(scene, "fast64") or not hasattr(scene.fast64, "sm64"):
+            root.geo_cmd = previous_root_command
+            raise RuntimeError("Fast64 SM64 scene properties are not registered")
+        sm64_props = scene.fast64.sm64
+        combined = sm64_props.combined_export
+        previous_scene_values = {
+            "export_type": sm64_props.export_type,
+            "export_header_type": combined.export_header_type,
+            "custom_export_path": combined.custom_export_path,
+            "export_gfx": combined.export_gfx,
+            "export_col": combined.export_col,
+            "export_anim": combined.export_anim,
+            "export_all_selected": combined.export_all_selected,
+            "graphics_object": combined.graphics_object,
+            "object_name": combined.object_name,
+            "use_name_filtering": combined.use_name_filtering,
+            "saveTextures": scene.saveTextures,
+        }
+        old_active = bpy.context.view_layer.objects.active
+        old_selected = list(bpy.context.selected_objects)
+        try:
+            if hasattr(scene, "gameEditorMode"):
+                try:
+                    scene.gameEditorMode = "SM64"
+                except Exception:
+                    pass
+            sm64_props.export_type = "C"
+            combined.export_header_type = "Custom"
+            combined.custom_export_path = str(output_root)
+            combined.export_gfx = True
+            combined.export_col = False
+            combined.export_anim = False
+            combined.export_all_selected = False
+            combined.graphics_object = mesh
+            combined.object_name = p.get("object_name") or mesh.name
+            combined.use_name_filtering = False
+            scene.saveTextures = bool(p.get("save_textures", True))
+            bpy.ops.object.select_all(action="DESELECT")
+            armature.select_set(True)
+            bpy.context.view_layer.objects.active = armature
+            result = bpy.ops.object.sm64_export_geolayout_armature(export_obj=armature.name)
+            if "FINISHED" not in result:
+                raise RuntimeError(f"Fast64 SM64 geolayout exporter did not finish: {sorted(result)}")
+        finally:
+            root.geo_cmd = root.geo_cmd if root.geo_cmd == "Start" else previous_root_command
+            sm64_props.export_type = previous_scene_values["export_type"]
+            combined.export_header_type = previous_scene_values["export_header_type"]
+            combined.custom_export_path = previous_scene_values["custom_export_path"]
+            combined.export_gfx = previous_scene_values["export_gfx"]
+            combined.export_col = previous_scene_values["export_col"]
+            combined.export_anim = previous_scene_values["export_anim"]
+            combined.export_all_selected = previous_scene_values["export_all_selected"]
+            combined.graphics_object = previous_scene_values["graphics_object"]
+            combined.object_name = previous_scene_values["object_name"]
+            combined.use_name_filtering = previous_scene_values["use_name_filtering"]
+            scene.saveTextures = previous_scene_values["saveTextures"]
+            _restore_selection(old_active, old_selected)
+        files = sorted(path for path in output_root.rglob("*") if path.is_file())
+        if not files:
+            raise RuntimeError("Fast64 returned FINISHED but generated no files in the selected output folder")
+        return {
+            "armature": armature.name,
+            "mesh": mesh.name,
+            "export_format": "Fast64 SM64 C geolayout",
+            "export_folder": str(output_root),
+            "files": [str(path.relative_to(output_root)) for path in files],
+            "binary_skinning_bones": used_bones,
+            "native_f3d_materials": [mat.name for mat in materials],
+        }
+
     if action == "fast64_diagnostics":
         modules = fast64_modules()
         enabled = [name for name in bpy.context.preferences.addons.keys() if "fast64" in name.lower()]
         ops = [x for x in dir(bpy.ops) if "fast64" in x.lower() or "sm64" in x.lower() or x.lower() in {"f3d", "oot", "z64"}]
-        return {"loaded": bool(modules or enabled), "modules": modules[:100], "enabled_addons": enabled, "operator_namespaces": ops}
+        addon = sys.modules.get("fast64")
+        version = addon.bl_info.get("version") if addon and hasattr(addon, "bl_info") else None
+        return {"loaded": bool(modules or enabled or fast64_ready()), "version": version, "modules": modules[:100], "enabled_addons": enabled, "operator_namespaces": ops}
 
     if action == "fast64_export_operators":
         return _operator_catalog()
@@ -387,13 +657,47 @@ def run(req):
     raise ValueError(f"Unsupported action: {action}")
 
 
+MUTATING_ACTIONS = {
+    "rename_object",
+    "set_object_transform",
+    "import_model",
+    "create_mesh_object",
+    "create_armature",
+    "bind_mesh_to_armature",
+    "set_vertex_weights",
+    "set_sm64_binary_skinning",
+    "create_material",
+    "assign_material",
+    "smart_uv_unwrap",
+    "convert_materials_to_f3d",
+    "export_sm64_armature",
+}
+
+
 def main():
     try:
         args = sys.argv[sys.argv.index("--") + 1:]
         req = json.loads(Path(args[0]).read_text(encoding="utf-8"))
-        emit(run(req))
+        workspace = Path(req["workspace"]).resolve()
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "imports").mkdir(parents=True, exist_ok=True)
+        (workspace / "exports").mkdir(parents=True, exist_ok=True)
+
+        action = req.get("action")
+        if os.getenv("BFAI_FAST64_ADDON_PATH") or action in {
+            "fast64_diagnostics", "convert_materials_to_f3d",
+            "set_sm64_binary_skinning", "sm64_skinning_context",
+            "export_sm64_armature", "fast64_export_operators", "fast64_run_export",
+        }:
+            try_enable_fast64()
+
+        load_workspace_project(workspace)
+        result = run(req)
+        if action in MUTATING_ACTIONS:
+            save_workspace_project(workspace)
+        emit(result)
     except Exception as exc:
-        emit(error=f"{exc}\n{traceback.format_exc()[-3000:]}")
+        emit(error=f"{exc}\n{traceback.format_exc()[-5000:]}")
 
 
 if __name__ == "__main__":

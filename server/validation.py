@@ -151,3 +151,34 @@ def validate_scalar(value, label, minimum, maximum):
     if not minimum <= result <= maximum:
         raise ValueError(f"{label} must be between {minimum} and {maximum}")
     return result
+
+
+def safe_export_folder(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+        raise ValueError("export folder must use 1..64 letters, numbers, underscores or hyphens")
+    return value
+
+
+def validate_sm64_binary_assignments(assignments, bone_names, vertex_count):
+    """Require one deform bone per mesh vertex for SM64's binary skinning."""
+    if not isinstance(assignments, list) or len(assignments) != vertex_count:
+        raise ValueError(f"SM64 binary skinning requires exactly one assignment for each of {vertex_count} vertices")
+    valid_bones = set(bone_names)
+    normalized = []
+    seen_vertices = set()
+    for item in assignments:
+        if not isinstance(item, dict):
+            raise ValueError("each SM64 assignment must be an object")
+        vertex = item.get("vertex")
+        if isinstance(vertex, bool) or not isinstance(vertex, int) or not 0 <= vertex < vertex_count:
+            raise ValueError("SM64 assignment vertex index out of range")
+        if vertex in seen_vertices:
+            raise ValueError(f"vertex {vertex} has more than one bone assignment")
+        bone = safe_name(item.get("bone"), "SM64 deform bone")
+        if bone not in valid_bones:
+            raise ValueError(f"unknown or non-deform SM64 bone: {bone}")
+        seen_vertices.add(vertex)
+        normalized.append({"vertex": vertex, "bone": bone})
+    if len(seen_vertices) != vertex_count:
+        raise ValueError("every mesh vertex must be assigned to exactly one deform bone")
+    return sorted(normalized, key=lambda item: item["vertex"])

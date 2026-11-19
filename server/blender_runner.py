@@ -10,7 +10,7 @@ WORK = DATA / "workspace"
 IMPORTS = WORK / "imports"
 EXPORTS = WORK / "exports"
 BLENDER = os.getenv("BLENDER_BIN", "blender")
-TIMEOUT = int(os.getenv("BLENDER_TIMEOUT_SECONDS", "180"))
+TIMEOUT = int(os.getenv("BLENDER_TIMEOUT_SECONDS", "300"))
 
 def run_blender(action, **params):
     WORK.mkdir(parents=True, exist_ok=True)

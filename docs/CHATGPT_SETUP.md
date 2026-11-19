@@ -6,7 +6,7 @@ This repository is a local MCP stdio server. It is not an Internet service and i
 
 ## Local development
 
-Run the server with `python -m server.main` from the repository root. Configure a local MCP-compatible client to start that command using Python 3.11 and the repository as its working directory. The server launches Blender in background mode for each operation; set `BLENDER_BIN` if the Blender executable is not named `blender`.
+Run the server with `python -m server.main` from the repository root. Configure a local MCP-compatible client to start that command using Python 3.11 and the repository as its working directory. The server launches Blender in background mode for each operation; set `BLENDER_BIN` if the Blender executable is not named `blender`. Every worker loads `data/workspace/active.blend` when it exists. Successful scene mutations save the project automatically, preserving a `.blend1` backup.
 
 ## Blender workspace
 
@@ -15,7 +15,10 @@ Run the server with `python -m server.main` from the repository root. Configure 
 - `create_mesh_object` creates editable geometry from vertex coordinates and face indices.
 - `create_armature` builds the bone hierarchy; `bind_mesh_to_armature` tries Blender automatic weights, and `set_vertex_weights` accepts explicit per-vertex weights.
 - Use `smart_uv_unwrap` to generate a UV map. Review seams/islands before production use.
-- Exports are restricted to `data/workspace/exports/`. Use `fast64_export_operators` to inspect the installed Fast64 version, then pass one exact returned operator identifier to `fast64_run_export`.
+- For Fast64, set `BFAI_FAST64_ADDON_PATH` to the directory containing the Fast64 addon's `__init__.py`, or enable the addon in the Blender profile used by the worker.
+- Use `convert_materials_to_f3d` before exporting; ordinary Principled materials are not native F3D materials.
+- For SM64, call `set_sm64_binary_skinning` with one bone assignment per vertex and then `export_sm64_armature`. The exporter writes Fast64 C geolayout output, not DynOS.
+- Exports are restricted to `data/workspace/exports/`. Use `fast64_export_operators` to inspect other installed Fast64 operators, then pass one exact returned operator identifier to `fast64_run_export`.
 
 Back up the `.blend` project and the target game repository before testing edits or exports. Fast64 operators may require a configured decomp project, F3D materials, selection, or a UI context that is unavailable in background mode.
 

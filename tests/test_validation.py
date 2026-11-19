@@ -2,6 +2,7 @@ import unittest
 from server.validation import (
     finite_vector, safe_filename, safe_texture_filename, validate_mesh_data,
     validate_bones, validate_weights, validate_color, validate_scalar,
+    safe_export_folder, validate_sm64_binary_assignments,
 )
 
 
@@ -65,6 +66,37 @@ class ValidationTests(unittest.TestCase):
     def test_weight_index_rejected(self):
         with self.assertRaises(ValueError):
             validate_weights([{"bone": "Root", "vertex": 3, "weight": 1}], ["Root"], 3)
+
+    def test_sm64_binary_assignments(self):
+        assignments = [
+            {"vertex": 0, "bone": "Body"},
+            {"vertex": 1, "bone": "Body"},
+        ]
+        self.assertEqual(
+            validate_sm64_binary_assignments(assignments, ["Body"], 2),
+            assignments,
+        )
+
+    def test_sm64_requires_one_assignment_per_vertex(self):
+        with self.assertRaises(ValueError):
+            validate_sm64_binary_assignments([{"vertex": 0, "bone": "Body"}], ["Body"], 2)
+
+    def test_sm64_rejects_duplicate_or_unknown_bones(self):
+        with self.assertRaises(ValueError):
+            validate_sm64_binary_assignments(
+                [{"vertex": 0, "bone": "Body"}, {"vertex": 0, "bone": "Body"}],
+                ["Body"], 2,
+            )
+        with self.assertRaises(ValueError):
+            validate_sm64_binary_assignments(
+                [{"vertex": 0, "bone": "Missing"}, {"vertex": 1, "bone": "Body"}],
+                ["Body"], 2,
+            )
+
+    def test_export_folder_is_safe(self):
+        self.assertEqual(safe_export_folder("steve_mesh"), "steve_mesh")
+        with self.assertRaises(ValueError):
+            safe_export_folder("../outside")
 
     def test_color_and_scalar(self):
         self.assertEqual(validate_color([1, 0, 0, 1]), [1.0, 0.0, 0.0, 1.0])

@@ -23,3 +23,33 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y blender
       - name: Test Blender mesh, rigging, UVs, materials and save
         run: blender --background --factory-startup --python tests/blender_smoke.py
+
+  blender-persistence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender
+        run: sudo apt-get update && sudo apt-get install -y blender
+      - name: Verify scene survives separate Blender worker processes
+        env:
+          BLENDER_BIN: blender
+          BFAI_DATA_DIR: ${{ runner.temp }}/bfai-persistence
+        run: python tests/persistence_smoke.py
+  fast64-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Fast64 source
+        uses: actions/checkout@v4
+        with:
+          repository: Fast-64/fast64
+          ref: ea622b16a9821cf85154239d774120462c07e927
+          path: external/fast64
+          persist-credentials: false
+      - name: Install Blender
+        run: sudo apt-get update && sudo apt-get install -y blender
+      - name: Load Fast64 and test F3D conversion plus SM64 geolayout C export
+        env:
+          BFAI_FAST64_ADDON_PATH: ${{ github.workspace }}/external/fast64
+          BFAI_DATA_DIR: ${{ runner.temp }}/bfai-fast64
+        run: blender --background --factory-startup --python tests/fast64_smoke.py
