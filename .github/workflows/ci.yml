@@ -58,24 +58,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout pinned Fast64 addon
+      - name: Checkout pinned Fast64-Gart addon
         uses: actions/checkout@v4
         with:
-          repository: Fast-64/fast64
-          ref: ea622b16a9821cf85154239d774120462c07e927
+          repository: ManIsCat2/Fast64-Gart
+          ref: 9384477f2ccdc8b6e05a96b52241f98808feb90b
           path: external/fast64
           persist-credentials: false
-      - name: Install Blender and template dependencies
+      - name: Checkout pinned Coop Deluxe character template and textures
+        uses: actions/checkout@v4
+        with:
+          repository: coop-deluxe/character-template
+          ref: 58149f1b58cef75c7f90c19f6d3cadb66bd5b915
+          path: external/character-template
+          persist-credentials: false
+      - name: Install Blender and Fast64 dependencies
         run: sudo apt-get update && sudo apt-get install -y blender python3-numpy
-      - name: Download official Coop Deluxe Mario template
-        run: curl -L --fail --retry 3 "https://raw.githubusercontent.com/coop-deluxe/character-template/main/Mario%20Coop%20Model%20Template.blend" -o mario-template.blend
-      - name: Inspect Mario rig and mesh structure
+      - name: Build blue-cap and gold-emblem Mario DynOS source pack
         env:
-          BFAI_REPORT: ${{ github.workspace }}/mario_template_report.json
-        run: blender --background mario-template.blend --python tests/dynos_mario_template.py
-      - name: Upload Mario template inspection
+          BFAI_FAST64_ADDON_PATH: ${{ github.workspace }}/external/fast64
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: blender --background "${{ github.workspace }}/external/character-template/Mario Coop Model Template.blend" --python tests/dynos_mario_export.py
+      - name: Upload Mario Star DynOS source pack
         uses: actions/upload-artifact@v4
         with:
-          name: dynos-mario-template-inspection
-          path: mario_template_report.json
+          name: mario-star-dynos-source-pack
+          path: |
+            MarioStar-DynOS-source-pack.zip
+            mario_star_variant.blend
+            mario_star_export_report.json
+            dynos/packs/MarioStar/
           if-no-files-found: error
