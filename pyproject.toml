@@ -1,0 +1,9 @@
+[project]
+name = "blender-fast64-ai"
+version = "0.1.0a1"
+description = "MCP bridge for Blender and Fast64"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.9,<2.0"]
+
+[tool.unittest]
+start-directory = "tests"
