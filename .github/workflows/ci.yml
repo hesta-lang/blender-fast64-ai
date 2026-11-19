@@ -46,8 +46,8 @@ jobs:
           ref: ea622b16a9821cf85154239d774120462c07e927
           path: external/fast64
           persist-credentials: false
-      - name: Install Blender
-        run: sudo apt-get update && sudo apt-get install -y blender
+      - name: Install Blender and Fast64 Python dependency
+        run: sudo apt-get update && sudo apt-get install -y blender python3-numpy
       - name: Load Fast64 and test F3D conversion plus SM64 geolayout C export
         env:
           BFAI_FAST64_ADDON_PATH: ${{ github.workspace }}/external/fast64

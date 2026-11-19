@@ -1,6 +1,11 @@
 """Verify that separate Blender subprocesses share one saved active.blend."""
-import os
+import shutil
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from server.blender_runner import WORK, run_blender
 
@@ -12,11 +17,7 @@ def check(condition, message):
 
 def main():
     if WORK.exists():
-        for path in sorted(WORK.rglob("*"), reverse=True):
-            if path.is_file():
-                path.unlink()
-            elif path.is_dir():
-                path.rmdir()
+        shutil.rmtree(WORK)
     WORK.mkdir(parents=True, exist_ok=True)
 
     created = run_blender(
@@ -53,6 +54,8 @@ def main():
 
     project = WORK / "active.blend"
     check(project.is_file(), "active.blend was not saved automatically")
+    backup = WORK / "active.blend1"
+    check(backup.is_file(), "previous active.blend was not preserved as a backup")
     print("BFAI_PERSISTENCE_SMOKE:PASS")
 
 
