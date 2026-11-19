@@ -1,6 +1,7 @@
 """Create and export a blue-cap/gold-emblem Mario DynOS source pack."""
 import json
 import os
+import re
 import sys
 import zipfile
 from collections import Counter
@@ -196,9 +197,10 @@ def main():
     require(geo_files, "No geolayout output was generated")
     require(model_files, "No model/display-list output was generated")
 
-    # DynOS scans the immediate children of dynos/packs/<pack> and reads
-    # model.inc.c / geo.inc.c inside each child folder. Fast64-Gart creates
-    # Assets/mario/*, so flatten that one extra directory into Assets/*.
+    # DynOS scans immediate children of dynos/packs/<pack> for actor C
+    # sources. Fast64-Gart exports those sources in Assets/mario/, but the
+    # model's #include strings intentionally point to Assets/mario/*.png.
+    # Move ONLY C/header sources to Assets/ and preserve the texture directory.
     actor_dirs = [
         path for path in assets_dir.iterdir()
         if path.is_dir() and (path / "model.inc.c").is_file() and (path / "geo.inc.c").is_file()
@@ -207,41 +209,65 @@ def main():
             "Expected exactly one Fast64 actor folder containing model.inc.c and geo.inc.c; found: " +
             ", ".join(path.name for path in actor_dirs))
     exported_actor_dir = actor_dirs[0]
-    moved_files = []
-    for child in sorted(exported_actor_dir.iterdir()):
-        destination = assets_dir / child.name
-        require(not destination.exists(), f"DynOS Assets flattening would overwrite {destination.name}")
-        child.rename(destination)
-        moved_files.append(destination.name)
-    exported_actor_dir.rmdir()
+    source_names = ("model.inc.c", "geo.inc.c", "geo_header.h", "texture.inc.c", "collision.inc.c")
+    for name in source_names:
+        source = exported_actor_dir / name
+        if source.is_file():
+            destination = assets_dir / name
+            require(not destination.exists(), f"DynOS source move would overwrite {destination.name}")
+            source.rename(destination)
 
-    # Verify the exact layout used by SM64CoopDX's DynOS_Actor_GeneratePack:
-    # <pack>/<subfolder>/model.inc.c and <pack>/<subfolder>/geo.inc.c.
+    # Exact DynOS actor layout: the immediate child Assets/ contains actor C
+    # sources. Texture PNGs stay in Assets/mario/ because model.inc.c includes
+    # them as Assets/mario/<texture>.rgba16.inc.c; DynOS resolves that to .png.
     require((assets_dir / "model.inc.c").is_file(),
             "DynOS pack layout invalid: Assets/model.inc.c is missing")
     require((assets_dir / "geo.inc.c").is_file(),
             "DynOS pack layout invalid: Assets/geo.inc.c is missing")
     require((assets_dir / "geo_header.h").is_file(),
             "Fast64 export is missing Assets/geo_header.h")
+    require(exported_actor_dir.is_dir(), "Texture directory Assets/mario/ was lost")
     geo_source = (assets_dir / "geo.inc.c").read_text(encoding="utf-8")
+    model_source = (assets_dir / "model.inc.c").read_text(encoding="utf-8")
     require("mario_geo[]" in geo_source,
             "DynOS actor root must be named mario_geo so SM64CoopDX generates mario_geo.bin")
-    require(not any(path.is_dir() for path in assets_dir.iterdir()),
-            "DynOS Assets must contain the actor source files directly, not another nested folder")
-    generated = sorted(path for path in assets_dir.iterdir() if path.is_file())
+
+    # DynOS strips the .inc.c suffix from texture include paths and loads the
+    # corresponding PNG. Validate every referenced image before packaging.
+    texture_includes = re.findall(r'#include\\s+"([^"]+\\.inc\\.c)"', model_source)
+    require(texture_includes, "model.inc.c contains no texture include references")
+    missing_textures = []
+    for include in texture_includes:
+        png_relative = include[:-len(".inc.c")] + ".png"
+        if not (pack_root / png_relative).is_file():
+            missing_textures.append(png_relative)
+    require(not missing_textures,
+            "DynOS model references missing PNG textures: " + ", ".join(missing_textures))
+
+    # The actor source files must be directly under Assets; nested directories
+    # are permitted only for the texture paths referenced by the C source.
+    unexpected_dirs = [p.name for p in assets_dir.iterdir()
+                       if p.is_dir() and p != exported_actor_dir]
+    require(not unexpected_dirs,
+            "Unexpected nested DynOS Assets directories: " + ", ".join(unexpected_dirs))
+    texture_files = sorted(p for p in exported_actor_dir.iterdir() if p.is_file())
+    require(texture_files and all(p.suffix.lower() == ".png" for p in texture_files),
+            "Assets/mario/ must contain the referenced PNG textures only")
+    generated = sorted(path for path in assets_dir.rglob("*") if path.is_file())
     geo_files = [path.name for path in generated if "geo" in path.name.lower()]
     model_files = [path.name for path in generated if "model" in path.name.lower()]
 
     pack_root.joinpath("README.txt").write_text(
-        "Mario Star - DynOS source pack candidate\n"
-        "========================================\n\n"
-        "Install this folder under the game's dynos/packs directory.\n"
-        "The model.inc.c, geo.inc.c, geo_header.h and textures are directly in Assets/.\n"
-        "This direct layout is required by SM64CoopDX DynOS_Actor_GeneratePack.\n"
-        "Install MarioStar under dynos/packs, then start the game to generate mario_geo.bin.\n"
-        "Enable MarioStar in Options > DynOS Packs. It replaces the Mario model; it does not\n"
-        "create a separate player entry named Mario Star. Delete old mario_geo.bin first.\n\n"
-        "CI validates source layout and export. It does not launch SM64CoopDX.\n",
+        "Mario Star - DynOS source pack candidate\\n"
+        "========================================\\n\\n"
+        "Install this folder under the game's dynos/packs directory.\\n"
+        "Assets/model.inc.c, geo.inc.c and geo_header.h are directly inside Assets/.\\n"
+        "Keep the PNG textures in Assets/mario/: model.inc.c references those exact paths.\\n"
+        "SM64CoopDX reads actor sources from the immediate Assets/ child folder and resolves\\n"
+        "texture includes against PNG files under the pack root.\\n"
+        "Install MarioStar under dynos/packs, delete any old mario_geo.bin, then start the game.\\n"
+        "Enable MarioStar in Options > DynOS Packs. It replaces Mario; it is not a separate player.\\n\\n"
+        "CI validates source layout, texture references and Fast64 export. It does not launch the game.\\n",
         encoding="utf-8",
     )
     try:
