@@ -86,15 +86,16 @@ dynos/packs/MarioStar/
     geo.inc.c
     geo_header.h
     model.inc.c
-    *.png
+    mario/
+      *.png
   README.txt
 ```
 
-Este nivel es obligatorio: el generador de SM64CoopDX recorre las carpetas inmediatas del pack y busca `model.inc.c` y `geo.inc.c` dentro de cada una. No debe quedar un nivel extra como `Assets/mario/model.inc.c`.
+La ubicación de los fuentes es obligatoria: el generador de SM64CoopDX recorre las carpetas inmediatas del pack y busca `model.inc.c` y `geo.inc.c` dentro de cada una. Las imágenes deben permanecer en `Assets/mario/`, porque `model.inc.c` las referencia con rutas como `Assets/mario/mario_eyes_center.rgba16.inc.c`; DynOS resuelve esas inclusiones buscando el PNG correspondiente. No aplanes las imágenes junto a los fuentes.
 
 Para probarlo, copia la carpeta `MarioStar` a `dynos/packs/`, elimina cualquier `mario_geo.bin` antiguo de ese pack y abre el juego. SM64CoopDX generará `mario_geo.bin` en la raíz de `MarioStar`. Después activa `MarioStar` en **Options > DynOS Packs**. Esta variante reemplaza el modelo de Mario; no agrega una entrada de personaje separada llamada “Mario Star”.
 
-El artifact `mario-star-dynos-source-pack` incluye el ZIP del pack, el proyecto Blender y un informe JSON. La CI valida la estructura de fuentes y la exportación Fast64-Gart, pero no inicia el juego; la prueba visual final sigue pendiente.
+El artifact `mario-star-dynos-source-pack` incluye el ZIP del pack, el proyecto Blender y un informe JSON. La CI valida la estructura de fuentes, que cada inclusión de textura tenga su PNG correspondiente y la exportación Fast64-Gart, pero no inicia el juego; la prueba visual final sigue pendiente.
 
 ## Limitaciones de esta alpha
 
