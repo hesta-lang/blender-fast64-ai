@@ -1,0 +1,10 @@
+services:
+  blender-fast64-ai:
+    build: .
+    environment:
+      BFAI_DATA_DIR: /data
+      BLENDER_BIN: /usr/bin/blender
+    volumes:
+      - ./data:/data
+    stdin_open: true
+    tty: true

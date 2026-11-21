@@ -1,0 +1,130 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m compileall -q server blender_runner tests scripts blender_addon
+      - run: python -m unittest discover -s tests -v
+  blender-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender
+        run: sudo apt-get update && sudo apt-get install -y blender
+      - name: Test Blender mesh, rigging, UVs, materials and save
+        run: blender --background --factory-startup --python tests/blender_smoke.py
+
+  blender-diagnostic-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Blender and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender
+          python -m pip install -r requirements.txt
+      - name: Create synthetic Blender project
+        run: blender --background --factory-startup --python tests/create_diagnostic_fixture.py
+      - name: Run the same diagnostic script used by Android workflow
+        env:
+          BFAI_BLEND_INPUT: inbox/ci-fixture.blend
+          BFAI_DATA_DIR: ${{ runner.temp }}/bfai-diagnostic-smoke
+          BLENDER_BIN: blender
+        run: python scripts/diagnose_blend.py
+      - name: Verify generated JSON report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("reports/pipeline-report.json").read_text(encoding="utf-8"))
+          assert report["summary"]["objects_inspected"] == 1
+          assert report["objects"][0]["topology"]["vertices"] == 8
+          assert report["objects"][0]["materials"][0]["surface_output_connected"] is True
+          rig = report["objects"][0]["modifiers"][0]["rig"]
+          assert rig["bone_count"] == 1
+          assert rig["unweighted_vertices"] == 0
+          print("BFAI_DIAGNOSTIC_WORKFLOW:PASS")
+          PY
+
+  blender-persistence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender
+        run: sudo apt-get update && sudo apt-get install -y blender
+      - name: Verify scene survives separate Blender worker processes
+        env:
+          BLENDER_BIN: blender
+          BFAI_DATA_DIR: ${{ runner.temp }}/bfai-persistence
+        run: python tests/persistence_smoke.py
+  fast64-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Fast64 source
+        uses: actions/checkout@v4
+        with:
+          repository: Fast-64/fast64
+          ref: ea622b16a9821cf85154239d774120462c07e927
+          path: external/fast64
+          persist-credentials: false
+      - name: Install Blender and Fast64 Python dependency
+        run: sudo apt-get update && sudo apt-get install -y blender python3-numpy
+      - name: Load Fast64 and test F3D conversion plus SM64 geolayout C export
+        env:
+          BFAI_FAST64_ADDON_PATH: ${{ github.workspace }}/external/fast64
+          BFAI_DATA_DIR: ${{ runner.temp }}/bfai-fast64
+        run: blender --background --factory-startup --python tests/fast64_smoke.py
+
+  dynos-mario-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Fast64-Gart addon
+        uses: actions/checkout@v4
+        with:
+          repository: ManIsCat2/Fast64-Gart
+          ref: 9384477f2ccdc8b6e05a96b52241f98808feb90b
+          path: external/fast64
+          persist-credentials: false
+      - name: Checkout pinned Coop Deluxe character template and textures
+        uses: actions/checkout@v4
+        with:
+          repository: coop-deluxe/character-template
+          ref: 58149f1b58cef75c7f90c19f6d3cadb66bd5b915
+          path: external/character-template
+          persist-credentials: false
+      - name: Install Blender and Fast64 dependencies
+        run: sudo apt-get update && sudo apt-get install -y blender python3-numpy
+      - name: Build blue-cap and gold-emblem Mario DynOS source pack
+        env:
+          BFAI_FAST64_ADDON_PATH: ${{ github.workspace }}/external/fast64
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: blender --background "${{ github.workspace }}/external/character-template/Mario Coop Model Template.blend" --python tests/dynos_mario_export.py
+      - name: Upload Mario Star DynOS source pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: mario-star-dynos-source-pack
+          path: |
+            MarioStar-DynOS-source-pack.zip
+            mario_star_variant.blend
+            mario_star_export_report.json
+            dynos/packs/MarioStar/
+          if-no-files-found: error
