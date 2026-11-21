@@ -1,6 +1,6 @@
 # Blender Fast64 AI Bridge
 
-**0.3.0-alpha** — puente experimental MCP para crear y modificar escenas en Blender y descubrir/ejecutar exportadores Fast64 instalados.
+**0.4.0-alpha** — puente experimental MCP para crear y modificar escenas en Blender y descubrir/ejecutar exportadores Fast64 instalados.
 
 > **Estado real:** alpha local por stdio con inspector profundo del recorrido malla → UV/materiales → imágenes → armature → pesos → exportación. También incluye análisis de archivos .blend mediante GitHub Actions, utilizable desde el navegador del teléfono. No existe una conexión MCP en vivo para ChatGPT móvil/Free; consulta [CHATGPT_SETUP.md](docs/CHATGPT_SETUP.md).
 
