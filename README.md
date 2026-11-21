@@ -2,7 +2,7 @@
 
 **0.3.0-alpha** — puente experimental MCP para crear y modificar escenas en Blender y descubrir/ejecutar exportadores Fast64 instalados.
 
-> **Estado real:** alpha local por stdio. No está conectado automáticamente a ChatGPT. La conexión remota personalizada depende del plan y la interfaz compatibles; la app móvil no permite configurar servidores MCP personalizados. Consulta [CHATGPT_SETUP.md](docs/CHATGPT_SETUP.md).
+> **Estado real:** alpha local por stdio con inspector profundo del recorrido malla → UV/materiales → imágenes → armature → pesos → exportación. También incluye análisis de archivos .blend mediante GitHub Actions, utilizable desde el navegador del teléfono. No existe una conexión MCP en vivo para ChatGPT móvil/Free; consulta [CHATGPT_SETUP.md](docs/CHATGPT_SETUP.md).
 
 ## Arquitectura
 
@@ -25,9 +25,10 @@ Blender --background (blender_runner/)
 
 | Herramienta | Función |
 |---|---|
-| `workspace_status` / `inspect_scene` | Estado de Blender, escena, mallas, materiales, imágenes y huesos |
+| `workspace_status` / `inspect_scene` | Estado básico de Blender, escena y recursos |
+| `inspect_asset_pipeline` | Diagnóstico profundo de topología, UV, nodos, imágenes, armature, huesos, grupos, pesos y procedencia |
 | `list_objects`, `rename_object`, `set_object_transform` | Gestión de objetos |
-| `import_model` | Importa BLEND, FBX, OBJ, GLB, GLTF, STL o PLY desde `data/workspace/imports/` |
+| `import_model` | Importa BLEND, FBX, OBJ, GLB, GLTF, STL o PLY desde `data/workspace/imports/` y etiqueta cada objeto con el archivo/hash de origen |
 | `create_mesh_object` | Crea una malla Blender editable desde vértices y caras; límite 50.000 vértices/caras |
 | `smart_uv_unwrap` | Genera UVs mediante Smart UV Project |
 | `create_armature` | Crea un esqueleto de huesos con jerarquía padre-hijo |
@@ -37,13 +38,35 @@ Blender --background (blender_runner/)
 | `convert_materials_to_f3d` | Usa el conversor oficial de Fast64 para convertir materiales Principled en materiales F3D nativos |
 | `assign_material` | Asigna un material existente a una malla |
 | `set_sm64_binary_skinning` | Asigna exactamente un hueso deformador con peso 1.0 a cada vértice, para la skinning binaria de SM64 |
-| `export_sm64_armature` | Ejecuta el exportador de geolayout de armature C de Fast64; escribe debajo de `exports/` |
+| `export_sm64_armature` | Ejecuta el exportador de geolayout de armature C de Fast64 y genera `bfai_export_manifest.json` con hashes de salida y enlaces de origen |
 | `fast64_diagnostics` | Detecta módulos, addon habilitado y espacios de operadores |
 | `fast64_export_operators` | Descubre operadores de exportación y expone sus propiedades |
 | `fast64_run_export` | Ejecuta un operador de exportación detectado, con propiedades validadas y rutas restringidas a `exports/` |
 | `save_project` | Guarda la escena como `data/workspace/active.blend` |
 
 No se expone una consola Python, shell, ni ejecución de código arbitrario. El dispatcher solo acepta acciones definidas. Los datos de malla, huesos, pesos, colores y rutas se validan antes de llegar a Blender.
+
+## Diagnóstico y trazabilidad
+
+Ejecuta `inspect_asset_pipeline` para obtener un informe de solo lectura que sigue las conexiones reales de una malla:
+
+- Geometría: vértices, caras, triángulos, caras degeneradas y coordenadas no finitas.
+- UV: capas, cantidad de loops, rangos y valores no finitos.
+- Materiales: nodos, conexiones hasta la salida de superficie, materiales F3D y nodos de textura.
+- Imágenes: ruta absoluta resuelta, existencia, empaquetado y conexión al material.
+- Rig: modificadores Armature, huesos, padres, grupos de vértices, vértices sin peso y nombres sin correspondencia.
+- Procedencia: archivo/hash de importación y etapa del pipeline.
+
+Los objetos importados reciben propiedades `bfai_source_*`. Cada exportación SM64 C escribe un manifiesto JSON con los hashes SHA-256 de los archivos creados. El inspector no repara automáticamente los problemas: informa dónde se corta la cadena para que los cambios sean deliberados.
+
+### Diagnosticar un proyecto desde Android
+
+1. Sube el archivo `.blend` a `inbox/` en el repositorio. Mantén junto al proyecto las carpetas de texturas referenciadas mediante rutas relativas.
+2. Abre **Actions → Blender Project Diagnostics → Run workflow**.
+3. En `blend_path`, introduce la ruta completa dentro de `inbox/`, por ejemplo `inbox/Steve.blend`.
+4. Descarga el artifact `blender-pipeline-report` y adjunta `pipeline-report.json` a la conversación.
+
+El workflow abre Blender en segundo plano, desactiva la ejecución automática de scripts de los archivos .blend y solo ejecuta el inspector de lectura. No modifica el archivo de entrada. El informe identifica la etapa, pero no sustituye una captura del render del juego.
 
 ## Uso de archivos
 
