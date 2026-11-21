@@ -28,6 +28,15 @@ def inspect_scene() -> str:
 
 
 @mcp.tool()
+def inspect_asset_pipeline(object_name: str | None = None) -> str:
+    """Trace a mesh through topology, UVs, material nodes and image files, armature modifiers, bones, vertex groups and imported source metadata. Read-only."""
+    params = {}
+    if object_name is not None:
+        params["object_name"] = safe_name(object_name)
+    return encoded(run_blender("inspect_asset_pipeline", **params))
+
+
+@mcp.tool()
 def list_objects() -> str:
     """List object names and types in the active Blender scene."""
     return encoded(run_blender("list_objects"))
