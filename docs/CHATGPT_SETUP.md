@@ -1,27 +1,35 @@
 # ChatGPT setup
 
-## Current limitation
+## Supported connection modes
 
-This repository is a local MCP stdio server. It is not an Internet service and is not automatically connected to this ChatGPT conversation. A custom remote MCP server requires a supported ChatGPT plan and client surface; the ChatGPT mobile app does not provide a place to configure a custom MCP server. Do not publish this alpha as a public endpoint.
+This project currently exposes a local MCP server over standard input/output (stdio). That is appropriate for a local MCP client on the same computer as Blender. It is not a public endpoint and cannot be reached by this ChatGPT conversation directly.
 
-## Local development
+According to the current OpenAI Help Center guidance, custom MCP apps are configured from ChatGPT on the web, not the mobile app. Full custom MCP/write support is available to Business and Enterprise/Edu workspaces; Pro has read/fetch-only custom MCP support. Free is not listed as a supported plan for custom MCP connections. The account currently used for this project is Free on Android, so a direct live MCP connection is not available in that setup.
 
-Run the server with `python -m server.main` from the repository root. Configure a local MCP-compatible client to start that command using Python 3.11 and the repository as its working directory. The server launches Blender in background mode for each operation; set `BLENDER_BIN` if the Blender executable is not named `blender`. Every worker loads `data/workspace/active.blend` when it exists. Successful scene mutations save the project automatically, preserving a `.blend1` backup.
+Official guidance: https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
 
-## Blender workspace
+## Recommended workflow for Android
 
-- Place model files in `data/workspace/imports/` before calling `import_model`.
-- Place image textures in the same folder before calling `create_material(texture_filename=...)`.
-- `create_mesh_object` creates editable geometry from vertex coordinates and face indices.
-- `create_armature` builds the bone hierarchy; `bind_mesh_to_armature` tries Blender automatic weights, and `set_vertex_weights` accepts explicit per-vertex weights.
-- Use `smart_uv_unwrap` to generate a UV map. Review seams/islands before production use.
-- For Fast64, set `BFAI_FAST64_ADDON_PATH` to the directory containing the Fast64 addon's `__init__.py`, or enable the addon in the Blender profile used by the worker.
-- Use `convert_materials_to_f3d` before exporting; ordinary Principled materials are not native F3D materials.
-- For SM64, call `set_sm64_binary_skinning` with one bone assignment per vertex and then `export_sm64_armature`. The exporter writes Fast64 C geolayout output, not DynOS.
-- Exports are restricted to `data/workspace/exports/`. Use `fast64_export_operators` to inspect other installed Fast64 operators, then pass one exact returned operator identifier to `fast64_run_export`.
+The repository includes a GitHub Actions path that does not require Blender to be installed on the phone:
 
-Back up the `.blend` project and the target game repository before testing edits or exports. Fast64 operators may require a configured decomp project, F3D materials, selection, or a UI context that is unavailable in background mode.
+1. Upload a trusted .blend file under inbox/ in the GitHub repository.
+2. Open Actions → Blender Project Diagnostics → Run workflow.
+3. Set blend_path to the complete relative file path, such as inbox/Steve.blend.
+4. Download the blender-pipeline-report artifact.
+5. Upload pipeline-report.json into the ChatGPT conversation. The report includes the SHA-256 hash of the exact source file so we can distinguish revisions.
 
-## Remote connection (future)
+Keep relative texture folders and other assets beside the .blend file. The diagnostic copies those sibling files into a temporary worker directory. It will report missing external references rather than silently repairing them. The workflow does not save or modify the uploaded .blend.
 
-Before exposing this service, add HTTPS and a standards-compliant OAuth 2.1 authorization/resource-server flow with PKCE, issuer/audience validation, scoped access tokens, per-user project isolation, rate limits, upload quarantine and audit logging. The current repository version is a local alpha and must not be exposed publicly.
+## Local Blender + MCP client
+
+Run the server with python -m server.main from the repository root. Configure a compatible local MCP client to start that command using Python 3.11 and the repository as its working directory. The server launches Blender in background mode for each operation. Set BLENDER_BIN if the Blender executable is not named blender.
+
+Each worker loads data/workspace/active.blend when it exists. Successful scene mutations save the project automatically, preserving an active.blend1 backup. inspect_asset_pipeline is read-only and traces the active project from mesh and UV data through materials, image nodes, armature modifiers, bones and vertex groups.
+
+For Fast64, set BFAI_FAST64_ADDON_PATH to the directory containing the addon's __init__.py, or enable the addon in the Blender profile used by the worker. Run convert_materials_to_f3d before exporting; an ordinary Principled BSDF material is not a native F3D material. export_sm64_armature writes Fast64 C geolayout output and a bfai_export_manifest.json with source metadata and output hashes. It does not create a DynOS pack.
+
+## Future remote MCP connection
+
+A direct ChatGPT connection requires a reachable remote MCP endpoint over HTTPS or an approved secure tunnel, with OAuth 2.1 authorization, scoped access tokens, issuer/audience validation, per-user project isolation, rate limits, upload quarantine and audit logging. The current local stdio server does not implement these services. Do not expose it publicly or create an unauthenticated HTTP tunnel.
+
+Even after that remote service is built, the user's current Free/mobile setup would still not be able to add a custom MCP app. The GitHub Actions report workflow is therefore the practical supported path for this project at present.
