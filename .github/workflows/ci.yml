@@ -28,6 +28,41 @@ jobs:
       - name: Test Blender mesh, rigging, UVs, materials and save
         run: blender --background --factory-startup --python tests/blender_smoke.py
 
+  blender-diagnostic-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Blender and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender
+          python -m pip install -r requirements.txt
+      - name: Create synthetic Blender project
+        run: blender --background --factory-startup --python tests/create_diagnostic_fixture.py
+      - name: Run the same diagnostic script used by Android workflow
+        env:
+          BFAI_BLEND_INPUT: inbox/ci-fixture.blend
+          BFAI_DATA_DIR: ${{ runner.temp }}/bfai-diagnostic-smoke
+          BLENDER_BIN: blender
+        run: python scripts/diagnose_blend.py
+      - name: Verify generated JSON report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("reports/pipeline-report.json").read_text(encoding="utf-8"))
+          assert report["summary"]["objects_inspected"] == 1
+          assert report["objects"][0]["topology"]["vertices"] == 8
+          assert report["objects"][0]["materials"][0]["surface_output_connected"] is True
+          rig = report["objects"][0]["modifiers"][0]["rig"]
+          assert rig["bone_count"] == 1
+          assert rig["unweighted_vertices"] == 0
+          print("BFAI_DIAGNOSTIC_WORKFLOW:PASS")
+          PY
+
   blender-persistence:
     runs-on: ubuntu-latest
     steps:
