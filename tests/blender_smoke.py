@@ -73,6 +73,19 @@ material_result = dispatch.run({
 })
 check(material_result["assigned_to"] == "BFAI_SmokeMesh", "material assignment failed")
 
+pipeline_result = dispatch.run({
+    "action": "inspect_asset_pipeline",
+    "workspace": str(workspace),
+    "params": {"object_name": "BFAI_SmokeMesh"},
+})
+check(pipeline_result["summary"]["objects_inspected"] == 1, "asset pipeline inspection returned the wrong object count")
+mesh_report = pipeline_result["objects"][0]
+check(mesh_report["topology"]["vertices"] == 4, "pipeline report lost mesh topology")
+check(mesh_report["uv_layers"], "pipeline report lost UV data")
+check(mesh_report["materials"][0]["surface_output_connected"], "pipeline report failed to follow the material surface output")
+check(mesh_report["modifiers"][0]["rig"]["bone_count"] == 1, "pipeline report failed to follow the armature and bone hierarchy")
+check(mesh_report["modifiers"][0]["rig"]["unweighted_vertices"] == 0, "pipeline report found unexpected unweighted vertices")
+
 save_result = dispatch.run({
     "action": "save_project",
     "workspace": str(workspace),
