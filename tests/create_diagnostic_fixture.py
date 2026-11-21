@@ -9,6 +9,10 @@ if str(ROOT) not in sys.path:
 import bpy
 from blender_runner import dispatch
 
+# Remove factory-startup objects so this fixture is deterministic.
+bpy.ops.object.select_all(action="SELECT")
+bpy.ops.object.delete(use_global=False)
+
 workspace = ROOT / "inbox" / "fixture-workspace"
 workspace.mkdir(parents=True, exist_ok=True)
 (workspace / "imports").mkdir(parents=True, exist_ok=True)
