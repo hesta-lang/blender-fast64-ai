@@ -125,6 +125,234 @@ def safe_workspace_file(folder, filename):
     return path
 
 
+def _source_metadata(obj):
+    keys = ("bfai_source_file", "bfai_source_format", "bfai_source_sha256", "bfai_imported_at", "bfai_pipeline_stage")
+    return {key: obj.get(key) for key in keys if obj.get(key) is not None}
+
+
+def _material_pipeline_report(material):
+    if material is None:
+        return {"name": None, "issues": ["empty_material_slot"]}
+    report = {
+        "name": material.name,
+        "use_nodes": bool(material.use_nodes),
+        "is_f3d": bool(getattr(material, "is_f3d", False)),
+        "blend_method": getattr(material, "blend_method", None),
+        "nodes": [],
+        "links": [],
+        "images": [],
+        "surface_output_connected": False,
+        "issues": [],
+    }
+    if not material.use_nodes or material.node_tree is None:
+        report["issues"].append("material_has_no_node_tree")
+        return report
+
+    nodes = list(material.node_tree.nodes)
+    links = list(material.node_tree.links)
+    output_nodes = [node for node in nodes if node.type == "OUTPUT_MATERIAL"]
+    upstream = set()
+    pending = []
+    for output in output_nodes:
+        surface = output.inputs.get("Surface")
+        if surface:
+            report["surface_output_connected"] = bool(surface.is_linked)
+            pending.extend(link.from_node for link in links if link.to_node == output and link.to_socket == surface)
+    while pending:
+        node = pending.pop()
+        if node in upstream:
+            continue
+        upstream.add(node)
+        for socket in node.inputs:
+            pending.extend(link.from_node for link in links if link.to_node == node and link.to_socket == socket)
+
+    for node in nodes:
+        node_info = {"name": node.name, "type": node.type, "label": node.label or None}
+        if node.type == "BSDF_PRINCIPLED":
+            base = node.inputs.get("Base Color")
+            if base and not base.is_linked:
+                node_info["base_color"] = [float(value) for value in base.default_value]
+            roughness = node.inputs.get("Roughness")
+            if roughness and not roughness.is_linked:
+                node_info["roughness"] = float(roughness.default_value)
+        if node.type == "TEX_IMAGE":
+            image = node.image
+            if image is None:
+                node_info["image"] = None
+                report["issues"].append("image_texture_node_without_image:" + node.name)
+            else:
+                raw_path = image.filepath or ""
+                absolute_path = bpy.path.abspath(raw_path) if raw_path else ""
+                packed = bool(getattr(image, "packed_file", None) or getattr(image, "packed_files", None))
+                exists = bool(absolute_path and Path(absolute_path).is_file())
+                image_info = {
+                    "name": image.name,
+                    "filepath": raw_path,
+                    "absolute_path": absolute_path or None,
+                    "exists_on_disk": exists,
+                    "packed": packed,
+                    "source": image.source,
+                    "size": [int(image.size[0]), int(image.size[1])],
+                    "used_by_output": node in upstream,
+                }
+                node_info["image"] = image_info
+                report["images"].append(image_info)
+                if not exists and not packed and image.source == "FILE":
+                    report["issues"].append("missing_image_file:" + image.name)
+                if node not in upstream:
+                    report["issues"].append("image_not_connected_to_surface:" + image.name)
+        report["nodes"].append(node_info)
+
+    for link in links:
+        report["links"].append({
+            "from_node": link.from_node.name,
+            "from_socket": link.from_socket.name,
+            "to_node": link.to_node.name,
+            "to_socket": link.to_socket.name,
+        })
+    if not output_nodes:
+        report["issues"].append("material_has_no_output_node")
+    elif not report["surface_output_connected"]:
+        report["issues"].append("material_surface_is_not_connected")
+    if not report["images"]:
+        report["issues"].append("material_has_no_image_texture")
+    return report
+
+
+def _diagnose_mesh_object(obj):
+    mesh = obj.data
+    mesh.calc_loop_triangles()
+    bounds = {
+        "dimensions": [float(value) for value in obj.dimensions],
+        "location": [float(value) for value in obj.location],
+        "rotation_euler": [float(value) for value in obj.rotation_euler],
+        "scale": [float(value) for value in obj.scale],
+        "matrix_world": [[float(value) for value in row] for row in obj.matrix_world],
+    }
+    uv_layers = []
+    for layer in mesh.uv_layers:
+        values = [[float(loop.uv[0]), float(loop.uv[1])] for loop in layer.data]
+        uv_layers.append({
+            "name": layer.name,
+            "loop_count": len(values),
+            "non_finite_values": sum(1 for pair in values if not all(math.isfinite(v) for v in pair)),
+            "minimum": [min((pair[i] for pair in values), default=None) for i in range(2)],
+            "maximum": [max((pair[i] for pair in values), default=None) for i in range(2)],
+        })
+
+    materials = [_material_pipeline_report(slot.material) for slot in obj.material_slots]
+    issues = []
+    if not materials:
+        issues.append({"severity": "error", "code": "mesh_has_no_material_slots", "message": "La malla no tiene ranuras de material."})
+    for material in materials:
+        for issue in material["issues"]:
+            severity = "error" if issue.startswith("missing_image_file:") or issue in {
+                "empty_material_slot", "material_has_no_output_node", "material_surface_is_not_connected"
+            } else "warning"
+            issues.append({"severity": severity, "code": issue, "material": material["name"]})
+    if not uv_layers:
+        issues.append({"severity": "warning", "code": "mesh_has_no_uv_map", "message": "No hay mapas UV; las texturas no podrán proyectarse correctamente."})
+    if any(layer["non_finite_values"] for layer in uv_layers):
+        issues.append({"severity": "error", "code": "uv_contains_non_finite_values"})
+    degenerate_faces = sum(1 for polygon in mesh.polygons if not math.isfinite(float(polygon.area)) or float(polygon.area) <= 1e-12)
+    non_finite_vertices = sum(1 for vertex in mesh.vertices if not all(math.isfinite(float(v)) for v in vertex.co))
+    if degenerate_faces:
+        issues.append({"severity": "warning", "code": "degenerate_faces", "count": degenerate_faces})
+    if non_finite_vertices:
+        issues.append({"severity": "error", "code": "non_finite_vertex_coordinates", "count": non_finite_vertices})
+
+    armature_links = []
+    for modifier in obj.modifiers:
+        entry = {"name": modifier.name, "type": modifier.type, "show_viewport": bool(modifier.show_viewport), "show_render": bool(modifier.show_render)}
+        if modifier.type == "ARMATURE":
+            armature = modifier.object
+            entry["armature"] = armature.name if armature else None
+            if armature and armature.type == "ARMATURE":
+                bones = list(armature.data.bones)
+                bone_names = {bone.name for bone in bones}
+                group_names = {group.name for group in obj.vertex_groups}
+                deform_bones = [bone for bone in bones if bone.use_deform]
+                counts = {name: 0 for name in group_names}
+                unweighted_vertices = 0
+                multi_influence_vertices = 0
+                for vertex in mesh.vertices:
+                    influences = [obj.vertex_groups[item.group].name for item in vertex.groups if item.weight > 1e-6 and item.group < len(obj.vertex_groups)]
+                    if not influences:
+                        unweighted_vertices += 1
+                    if len(influences) > 1:
+                        multi_influence_vertices += 1
+                    for name in set(influences):
+                        counts[name] = counts.get(name, 0) + 1
+                missing_groups = sorted(name for name in group_names if name not in bone_names)
+                missing_bone_groups = sorted(bone.name for bone in deform_bones if bone.name not in group_names)
+                entry["rig"] = {
+                    "name": armature.name,
+                    "parent": armature.parent.name if armature.parent else None,
+                    "bone_count": len(bones),
+                    "bones": [{
+                        "name": bone.name,
+                        "parent": bone.parent.name if bone.parent else None,
+                        "use_deform": bool(bone.use_deform),
+                        "head_local": [float(v) for v in bone.head_local],
+                        "tail_local": [float(v) for v in bone.tail_local],
+                    } for bone in bones],
+                    "vertex_group_vertex_counts": counts,
+                    "vertex_count": len(mesh.vertices),
+                    "unweighted_vertices": unweighted_vertices,
+                    "multi_influence_vertices": multi_influence_vertices,
+                    "groups_without_matching_bones": missing_groups,
+                    "deform_bones_without_groups": missing_bone_groups,
+                }
+                if unweighted_vertices:
+                    issues.append({"severity": "error", "code": "unweighted_vertices", "count": unweighted_vertices, "armature": armature.name})
+                if missing_groups:
+                    issues.append({"severity": "error", "code": "vertex_groups_without_bones", "names": missing_groups})
+                if missing_bone_groups:
+                    issues.append({"severity": "warning", "code": "deform_bones_without_vertex_groups", "names": missing_bone_groups})
+                if not modifier.show_viewport:
+                    issues.append({"severity": "warning", "code": "armature_modifier_disabled_in_viewport", "modifier": modifier.name})
+                if not modifier.show_render:
+                    issues.append({"severity": "warning", "code": "armature_modifier_disabled_in_render", "modifier": modifier.name})
+            elif armature is None:
+                issues.append({"severity": "error", "code": "armature_modifier_has_no_target", "modifier": modifier.name})
+        armature_links.append(entry)
+
+    if not armature_links or not any(item["type"] == "ARMATURE" for item in armature_links):
+        issues.append({"severity": "warning", "code": "mesh_has_no_armature_modifier"})
+    return {
+        "name": obj.name,
+        "type": obj.type,
+        "data_name": mesh.name,
+        "topology": {
+            "vertices": len(mesh.vertices),
+            "edges": len(mesh.edges),
+            "polygons": len(mesh.polygons),
+            "triangles": len(mesh.loop_triangles),
+            "degenerate_faces": degenerate_faces,
+            "non_finite_vertices": non_finite_vertices,
+        },
+        "transform": bounds,
+        "parent": obj.parent.name if obj.parent else None,
+        "children": [child.name for child in obj.children],
+        "collections": sorted(collection.name for collection in obj.users_collection),
+        "uv_layers": uv_layers,
+        "materials": materials,
+        "vertex_groups": [group.name for group in obj.vertex_groups],
+        "modifiers": armature_links,
+        "source": _source_metadata(obj),
+        "issues": issues,
+    }
+
+
+def _sha256_file(path):
+    import hashlib
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _operator_catalog():
     found = []
     for ns_name in dir(bpy.ops):
@@ -249,6 +477,56 @@ def run(req):
             "armatures": [{"name": o.name, "bones": [b.name for b in o.data.bones]} for o in bpy.data.objects if o.type == "ARMATURE"],
         }
 
+    if action == "inspect_asset_pipeline":
+        requested = p.get("object_name")
+        if requested:
+            target = safe_object(requested)
+            targets = [target] if target.type == "MESH" else [child for child in target.children_recursive if child.type == "MESH"]
+            if target.type == "MESH":
+                pass
+            elif not targets:
+                raise ValueError(f"Object {requested} is not a mesh and has no mesh descendants")
+        else:
+            targets = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"][:100]
+        object_reports = [_diagnose_mesh_object(obj) for obj in targets]
+        issue_counts = {}
+        for report in object_reports:
+            for issue in report["issues"]:
+                key = issue["severity"] + ":" + issue["code"]
+                issue_counts[key] = issue_counts.get(key, 0) + 1
+        world = bpy.context.scene.world
+        return {
+            "schema_version": 1,
+            "project": bpy.data.filepath or None,
+            "blender_version": bpy.app.version_string,
+            "scene": {
+                "name": bpy.context.scene.name,
+                "frame": int(bpy.context.scene.frame_current),
+                "render_engine": bpy.context.scene.render.engine,
+                "active_camera": bpy.context.scene.camera.name if bpy.context.scene.camera else None,
+                "resolution": [int(bpy.context.scene.render.resolution_x), int(bpy.context.scene.render.resolution_y)],
+                "world": {
+                    "name": world.name if world else None,
+                    "use_nodes": bool(world and world.use_nodes),
+                    "color": [float(v) for v in world.color] if world else None,
+                },
+            },
+            "summary": {
+                "objects_inspected": len(object_reports),
+                "mesh_objects_in_scene": sum(1 for obj in bpy.context.scene.objects if obj.type == "MESH"),
+                "materials_in_file": len(bpy.data.materials),
+                "images_in_file": len(bpy.data.images),
+                "armatures_in_scene": sum(1 for obj in bpy.context.scene.objects if obj.type == "ARMATURE"),
+                "issue_counts": issue_counts,
+            },
+            "objects": object_reports,
+            "notes": [
+                "Este informe sigue malla -> UV/material -> nodos -> imágenes y malla -> modificador -> armature -> grupos de vértices.",
+                "Los avisos identifican señales técnicas; no sustituyen una revisión visual del render final.",
+                "Los materiales F3D y el render de SM64 pueden diferir del aspecto de Blender Material Preview.",
+            ],
+        }
+
     if action == "list_objects":
         return [{"name": o.name, "type": o.type} for o in bpy.context.scene.objects]
 
@@ -268,6 +546,7 @@ def run(req):
         name = p["filename"]
         path = safe_workspace_file(imports, name)
         ext = path.suffix.lower()
+        before = {obj.as_pointer() for obj in bpy.context.scene.objects}
         if ext == ".blend":
             with bpy.data.libraries.load(str(path), link=False) as (src, dst): dst.objects = list(src.objects)
             for obj in dst.objects:
@@ -283,7 +562,22 @@ def run(req):
             else: bpy.ops.import_mesh.ply(filepath=str(path))
         else:
             raise ValueError("Unsupported import format")
-        return {"imported": name}
+        imported = [obj for obj in bpy.context.scene.objects if obj.as_pointer() not in before]
+        source_hash = _sha256_file(path)
+        imported_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        for obj in imported:
+            obj["bfai_source_file"] = name
+            obj["bfai_source_format"] = ext.lstrip(".")
+            obj["bfai_source_sha256"] = source_hash
+            obj["bfai_imported_at"] = imported_at
+            obj["bfai_pipeline_stage"] = "blender_import"
+        return {
+            "imported": name,
+            "source_sha256": source_hash,
+            "objects": [obj.name for obj in imported],
+            "tagged_objects": len(imported),
+            "provenance": "bfai_source_* custom properties",
+        }
 
     if action == "create_mesh_object":
         mesh = bpy.data.meshes.new(p["name"] + "Mesh")
@@ -607,12 +901,46 @@ def run(req):
         files = sorted(path for path in output_root.rglob("*") if path.is_file())
         if not files:
             raise RuntimeError("Fast64 returned FINISHED but generated no files in the selected output folder")
+        source = _source_metadata(mesh)
+        if not source:
+            source = _source_metadata(armature)
+        manifest_path = output_root / "bfai_export_manifest.json"
+        manifest = {
+            "schema_version": 1,
+            "exported_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            "blender_version": bpy.app.version_string,
+            "export_format": "Fast64 SM64 C geolayout",
+            "source": source,
+            "objects": {
+                "mesh": mesh.name,
+                "armature": armature.name,
+                "mesh_data": mesh.data.name,
+                "vertices": len(mesh.data.vertices),
+                "polygons": len(mesh.data.polygons),
+                "uv_layers": [layer.name for layer in mesh.data.uv_layers],
+                "materials": [mat.name for mat in materials],
+                "bones": [{
+                    "name": bone.name,
+                    "parent": bone.parent.name if bone.parent else None,
+                    "use_deform": bool(bone.use_deform),
+                } for bone in armature.data.bones],
+                "binary_skinning_bones": used_bones,
+            },
+            "files": [{
+                "path": str(path.relative_to(output_root)),
+                "size": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            } for path in files],
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        files = sorted(path for path in output_root.rglob("*") if path.is_file())
         return {
             "armature": armature.name,
             "mesh": mesh.name,
             "export_format": "Fast64 SM64 C geolayout",
             "export_folder": str(output_root),
             "files": [str(path.relative_to(output_root)) for path in files],
+            "manifest": str(manifest_path),
             "binary_skinning_bones": used_bones,
             "native_f3d_materials": [mat.name for mat in materials],
         }
