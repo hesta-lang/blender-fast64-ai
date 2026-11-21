@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Blender Fast64 AI Bridge Diagnostics",
     "author": "hesta-lang",
-    "version": (0, 2, 0),
+    "version": (0, 3, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > AI Bridge",
     "description": "Inspect Blender asset links and export a trace report for AI-assisted debugging",
