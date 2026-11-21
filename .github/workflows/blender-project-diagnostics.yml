@@ -35,8 +35,8 @@ jobs:
 
       - name: Inspect Blender project
         env:
-          BFAI_BLEND_INPUT: \${{ inputs.blend_path }}
-          BFAI_DATA_DIR: \${{ runner.temp }}/bfai-diagnostics-data
+          BFAI_BLEND_INPUT: ${{ inputs.blend_path }}
+          BFAI_DATA_DIR: ${{ runner.temp }}/bfai-diagnostics-data
           BLENDER_BIN: blender
         run: python scripts/diagnose_blend.py
 
