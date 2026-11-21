@@ -22,7 +22,7 @@ def run_blender(action, **params):
         request_path = f.name
     try:
         proc = subprocess.run(
-            [BLENDER, "--background", "--python", str(ROOT / "blender_runner" / "dispatch.py"), "--", request_path],
+            [BLENDER, "--background", "--disable-autoexec", "--python", str(ROOT / "blender_runner" / "dispatch.py"), "--", request_path],
             capture_output=True, text=True, timeout=TIMEOUT, check=False,
         )
         if proc.returncode != 0:
